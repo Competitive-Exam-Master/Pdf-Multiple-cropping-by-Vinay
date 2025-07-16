@@ -233,6 +233,7 @@
         </div>
 
         <button id="addBoxBtn" disabled>Add New Crop Box</button>
+        <button id="duplicateBoxBtn" disabled>Duplicate Current Box</button>
 
 
         <div class="pdf-viewer" id="pdfViewer">
@@ -271,6 +272,9 @@
         // New UI elements for go to page
         const gotoPageInput = document.getElementById('gotoPageInput');
         const gotoPageBtn = document.getElementById('gotoPageBtn');
+
+        // New UI element for duplicate box
+        const duplicateBoxBtn = document.getElementById('duplicateBoxBtn');
 
 
         let pdfDoc = null;
@@ -328,6 +332,7 @@
                     updatePageNavigation();
                     addBoxBtn.disabled = false;
                     processAndDownloadBtn.disabled = false; // Enable processing button
+                    duplicateBoxBtn.disabled = false; // Initially enable as user can add a box then duplicate
 
                     hideLoading();
 
@@ -370,6 +375,7 @@
             // Clear existing boxes and render boxes for the current page
             clearSelectionBoxes();
             loadBoxesForCurrentPage();
+            updateDuplicateButtonState(); // Set state after loading boxes for the page
             hideLoading();
         }
 
@@ -518,8 +524,79 @@
         addBoxBtn.addEventListener('click', () => {
             if (pdfDoc) {
                 createSelectionBox();
+                updateDuplicateButtonState(); // Update after adding a box
             }
         });
+
+        // --- Duplicate Box Logic ---
+        duplicateBoxBtn.addEventListener('click', () => {
+            if (!pdfDoc) {
+                alert('Please load a PDF first.');
+                return;
+            }
+            if (activeBoxes.size === 0) {
+                alert('No crop boxes to duplicate. Please add one first.');
+                return;
+            }
+            duplicateCurrentBox();
+        });
+
+        function duplicateCurrentBox() {
+            if (activeBoxes.size === 0) return;
+
+            // Find the last added box (or any arbitrary box if you don't track focus/last added)
+            // For simplicity, let's duplicate the first box found or the most recent one added.
+            // A more advanced implementation might track the 'currently selected' box.
+            const lastBoxId = Array.from(activeBoxes.keys()).pop(); // Get the ID of the last added box
+            if (!lastBoxId) return;
+
+            const originalBoxData = activeBoxes.get(lastBoxId);
+            const originalElement = originalBoxData.element;
+
+            const containerRect = pdfPageContainer.getBoundingClientRect();
+
+            // Get current pixel coordinates
+            const currentLeftPx = parseFloat(originalElement.style.left);
+            const currentTopPx = parseFloat(originalElement.style.top);
+            const currentWidthPx = parseFloat(originalElement.style.width);
+            const currentHeightPx = parseFloat(originalElement.style.height);
+
+            // Define an offset for the new box
+            const offsetX = 20; // pixels
+            const offsetY = 20; // pixels
+
+            // Calculate new positions, ensuring they stay within the container
+            let newLeftPx = currentLeftPx + offsetX;
+            let newTopPx = currentTopPx + offsetY;
+
+            // Wrap around if it goes too far right/down
+            if (newLeftPx + currentWidthPx > containerRect.width) {
+                newLeftPx = offsetX; // Reset to near left edge
+            }
+            if (newTopPx + currentHeightPx > containerRect.height) {
+                newTopPx = offsetY; // Reset to near top edge
+            }
+
+            // Convert new pixel coordinates back to percentage for `createSelectionBox`
+            const newCoords = {
+                left: `${(newLeftPx / containerRect.width * 100).toFixed(2)}%`,
+                top: `${(newTopPx / containerRect.height * 100).toFixed(2)}%`,
+                width: `${(currentWidthPx / containerRect.width * 100).toFixed(2)}%`,
+                height: `${(currentHeightPx / containerRect.height * 100).toFixed(2)}%`,
+                fixedWidth: originalBoxData.fixedWidth // Maintain fixed width property
+            };
+
+            const newBox = createSelectionBox(newCoords);
+            newBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); // Scroll to the new box if off-screen
+
+            updateDuplicateButtonState(); // Update the button state as a new box is added
+        }
+
+        // New helper function to update duplicate button state
+        function updateDuplicateButtonState() {
+            duplicateBoxBtn.disabled = activeBoxes.size === 0;
+        }
+
 
         // --- Drag & Resize Logic for Individual Boxes ---
 
@@ -616,6 +693,7 @@
                 e.stopPropagation();
                 boxElement.remove();
                 activeBoxes.delete(boxElement.id);
+                updateDuplicateButtonState(); // Update after removing a box
             });
         }
 
