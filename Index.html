@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Multiple Cropped Images</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background-color: #fff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            margin: 20px;
+            padding: 20px;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        input[type="file"] {
+            display: block;
+            margin: 15px auto;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: calc(100% - 22px);
+            max-width: 300px;
+        }
+        button {
+            display: block;
+            margin: 10px auto;
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .pdf-viewer {
+            position: relative;
+            width: 100%;
+            overflow-x: auto; /* For larger PDF pages */
+            border: 1px solid #ddd;
+            margin-top: 20px;
+            background-color: #eee;
+            text-align: center;
+            user-select: none; /* Prevent text selection during drag */
+            -webkit-user-select: none; /* For Safari */
+            -moz-user-select: none; /* For Firefox */
+            -ms-user-select: none; /* For IE/Edge */
+        }
+        .pdf-page-container {
+            position: relative;
+            display: inline-block; /* Allows content to be centered horizontally within viewer */
+        }
+        canvas {
+            border: 1px solid #ccc;
+            display: block; /* Remove extra space below canvas */
+            margin: 0 auto;
+        }
+        .selection-box {
+            position: absolute;
+            border: 2px dashed red;
+            background-color: rgba(255, 0, 0, 0.1);
+            cursor: grab; /* Indicate draggable */
+            box-sizing: border-box;
+            touch-action: none; /* Prevent default touch actions for drag */
+        }
+        .selection-box.resizing {
+            cursor: se-resize; /* Diagonal resize cursor */
+        }
+        /* New style for fixed width boxes */
+        .selection-box.fixed-width .resize-handle {
+            cursor: s-resize; /* Only vertical resize */
+            right: 50%; /* Center the handle horizontally */
+            transform: translateX(50%); /* Adjust for handle width */
+        }
+        /* Make the fixed-width box's border green to distinguish it */
+        .selection-box.fixed-width {
+            border: 2px dashed green;
+            background-color: rgba(0, 128, 0, 0.1);
+        }
+
+        .resize-handle {
+            position: absolute;
+            /* Increased size for easier selection */
+            width: 20px;
+            height: 20px;
+            background: blue;
+            border: 2px solid white; /* Slightly thicker border */
+            /* Adjusted position to keep it centered on the corner */
+            bottom: -10px; /* half of width/height */
+            right: -10px; /* half of width/height */
+            cursor: se-resize;
+            border-radius: 50%;
+            box-shadow: 0 0 5px rgba(0,0,0,0.5); /* Add a subtle shadow */
+            transition: background-color 0.2s, transform 0.2s; /* Smooth hover effect */
+        }
+        .resize-handle:hover {
+            background-color: darkblue;
+            transform: scale(1.2); /* Make it slightly larger on hover */
+        }
+
+        .close-handle {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            background: #f00;
+            color: white;
+            font-size: 12px;
+            text-align: center;
+            line-height: 14px;
+            border-radius: 50%;
+            top: -8px;
+            right: -8px;
+            cursor: pointer;
+            font-weight: bold;
+            z-index: 10;
+        }
+        .page-navigation {
+            text-align: center;
+            margin-top: 15px;
+        }
+        .page-navigation button {
+            display: inline-block;
+            margin: 0 5px;
+        }
+        #downloadLinks {
+            margin-top: 20px;
+            text-align: center;
+        }
+        #downloadLinks button {
+            background-color: #28a745;
+        }
+        #downloadLinks button:hover {
+            background-color: #218838;
+        }
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 24px;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        .fixed-width-options {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap; /* Allow wrapping on smaller screens */
+        }
+        .fixed-width-options label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .fixed-width-options input[type="number"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 80px;
+            text-align: center;
+        }
+
+        /* Mobile responsiveness */
+        @media (max-width: 600px) {
+            .container {
+                margin: 10px;
+                padding: 15px;
+            }
+            input[type="file"], button {
+                width: 90%;
+            }
+            .fixed-width-options {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="loading-overlay" id="loadingOverlay">Processing...</div>
+
+    <div class="container">
+        <h1>PDF Multiple Cropped Images by Vinay Godara</h1>
+
+        <input type="file" id="pdfFile" accept="application/pdf">
+        <button id="loadPdfBtn">Load PDF</button>
+
+        <div class="page-navigation">
+            <button id="prevPage" disabled>Previous</button>
+            <span id="pageNumber">Page: - / -</span>
+            <button id="nextPage" disabled>Next</button>
+        </div>
+
+        <div class="fixed-width-options">
+            <label>
+                <input type="checkbox" id="fixedWidthCheckbox"> Fixed Width?
+            </label>
+            <label>
+                Width (px):
+                <input type="number" id="fixedWidthInput" value="200" min="20" disabled>
+            </label>
+        </div>
+
+        <button id="addBoxBtn" disabled>Add New Crop Box</button>
+
+
+        <div class="pdf-viewer" id="pdfViewer">
+            <div class="pdf-page-container" id="pdfPageContainer">
+                <canvas id="pdfCanvas"></canvas>
+                </div>
+        </div>
+
+        <button id="processAndDownloadBtn" disabled>Process & Download Images</button>
+        <div id="downloadLinks">
+            </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.min.js"></script>
+
+    <script>
+        const pdfFile = document.getElementById('pdfFile');
+        const loadPdfBtn = document.getElementById('loadPdfBtn');
+        const pdfCanvas = document.getElementById('pdfCanvas');
+        const pdfPageContainer = document.getElementById('pdfPageContainer');
+        const prevPageBtn = document.getElementById('prevPage');
+        const nextPageBtn = document.getElementById('nextPage');
+        const pageNumberSpan = document.getElementById('pageNumber');
+        const addBoxBtn = document.getElementById('addBoxBtn');
+        const processAndDownloadBtn = document.getElementById('processAndDownloadBtn');
+        const downloadLinksDiv = document.getElementById('downloadLinks');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+
+        // New UI elements for fixed width
+        const fixedWidthCheckbox = document.getElementById('fixedWidthCheckbox');
+        const fixedWidthInput = document.getElementById('fixedWidthInput');
+
+        let pdfDoc = null;
+        let currentPageNum = 1;
+        let pdfPages = []; // Stores PDFPageProxy objects
+        let activeBoxes = new Map(); // Stores { id: { element, fixedWidth: boolean, coordinates, pageNum } } for current page
+        let allCropData = []; // Stores { pageNum, cropBoxes: [{left, top, width, height (percentages), fixedWidth (boolean)}] } for all cropped images
+
+        // Set PDF.js worker source
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        function showLoading(message = "Processing...") {
+            loadingOverlay.textContent = message;
+            loadingOverlay.style.display = 'flex'; // Use flex to center content
+        }
+
+        function hideLoading() {
+            loadingOverlay.style.display = 'none';
+        }
+
+        // --- Fixed Width Option Logic ---
+        fixedWidthCheckbox.addEventListener('change', () => {
+            fixedWidthInput.disabled = !fixedWidthCheckbox.checked;
+        });
+
+        fixedWidthInput.addEventListener('input', () => {
+            // Ensure a minimum value
+            if (parseInt(fixedWidthInput.value) < 20) {
+                fixedWidthInput.value = 20;
+            }
+        });
+
+        // --- PDF Loading and Rendering ---
+
+        loadPdfBtn.addEventListener('click', async () => {
+            const file = pdfFile.files[0];
+            if (!file) {
+                alert('Please select a PDF file.');
+                return;
+            }
+
+            showLoading('Loading PDF...');
+            const fileReader = new FileReader();
+            fileReader.onload = async () => {
+                const arrayBuffer = fileReader.result;
+                try {
+                    pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    pdfPages = []; // Clear previous pages
+                    for (let i = 1; i <= pdfDoc.numPages; i++) {
+                        pdfPages.push(await pdfDoc.getPage(i));
+                    }
+
+                    currentPageNum = 1;
+                    await renderPage(currentPageNum); // Wait for page to render
+                    updatePageNavigation();
+                    addBoxBtn.disabled = false;
+                    processAndDownloadBtn.disabled = false; // Enable processing button
+
+                    hideLoading();
+
+                } catch (error) {
+                    console.error('Error loading PDF:', error);
+                    alert('Error loading PDF. Please try again. ' + error.message);
+                    hideLoading();
+                }
+            };
+            fileReader.readAsArrayBuffer(file);
+        });
+
+        async function renderPage(num) {
+            if (!pdfDoc || num < 1 || num > pdfDoc.numPages) return;
+
+            showLoading(`Rendering Page ${num}...`);
+            const page = pdfPages[num - 1]; // Pages are 0-indexed in array
+
+            // *** DISPLAY QUALITY SETTING ***
+            const DISPLAY_RENDER_SCALE = 1.5;
+            const viewport = page.getViewport({ scale: DISPLAY_RENDER_SCALE });
+
+            const context = pdfCanvas.getContext('2d');
+            pdfCanvas.height = viewport.height;
+            pdfCanvas.width = viewport.width;
+
+            // Set container dimensions to match canvas for positioning selection box
+            pdfPageContainer.style.width = `${viewport.width}px`;
+            pdfPageContainer.style.height = `${viewport.height}px`;
+
+            const renderContext = {
+                canvasContext: context,
+                viewport: viewport,
+            };
+
+            await page.render(renderContext).promise;
+            console.log(`Page ${num} rendered.`);
+            pageNumberSpan.textContent = `Page: ${num} / ${pdfDoc.numPages}`;
+
+            // Clear existing boxes and render boxes for the current page
+            clearSelectionBoxes();
+            loadBoxesForCurrentPage();
+            hideLoading();
+        }
+
+        function updatePageNavigation() {
+            prevPageBtn.disabled = currentPageNum <= 1;
+            nextPageBtn.disabled = currentPageNum >= pdfDoc.numPages;
+        }
+
+        prevPageBtn.addEventListener('click', async () => {
+            if (currentPageNum > 1) {
+                saveBoxesForCurrentPage(); // Save current boxes before changing page
+                currentPageNum--;
+                await renderPage(currentPageNum);
+                updatePageNavigation();
+            }
+        });
+
+        nextPageBtn.addEventListener('click', async () => {
+            if (currentPageNum < pdfDoc.numPages) {
+                saveBoxesForCurrentPage(); // Save current boxes before changing page
+                currentPageNum++;
+                await renderPage(currentPageNum);
+                updatePageNavigation();
+            }
+        });
+
+        // --- Multiple Selection Box Management ---
+
+        let boxCounter = 0; // Unique ID for each box
+
+        function createSelectionBox(initialCoords = {}) {
+            const boxId = `box-${boxCounter++}`;
+            const selectionBox = document.createElement('div');
+            selectionBox.className = 'selection-box';
+            selectionBox.id = boxId;
+
+            const isFixedWidth = initialCoords.fixedWidth !== undefined ? initialCoords.fixedWidth : fixedWidthCheckbox.checked;
+
+            if (isFixedWidth) {
+                selectionBox.classList.add('fixed-width');
+            }
+
+            const containerRect = pdfPageContainer.getBoundingClientRect();
+            let boxWidth;
+
+            if (isFixedWidth) {
+                boxWidth = initialCoords.width ? parseFloat(initialCoords.width) / 100 * containerRect.width : Math.min(parseInt(fixedWidthInput.value) || 200, containerRect.width);
+            } else {
+                boxWidth = initialCoords.width ? parseFloat(initialCoords.width) / 100 * containerRect.width : 200;
+            }
+
+            const boxHeight = initialCoords.height ? parseFloat(initialCoords.height) / 100 * containerRect.height : 150;
+
+            const leftPx = initialCoords.left ? parseFloat(initialCoords.left) / 100 * containerRect.width : (containerRect.width / 2 - boxWidth / 2);
+            const topPx = initialCoords.top ? parseFloat(initialCoords.top) / 100 * containerRect.height : (containerRect.height / 2 - boxHeight / 2);
+
+
+            selectionBox.style.left = `${leftPx}px`;
+            selectionBox.style.top = `${topPx}px`;
+            selectionBox.style.width = `${boxWidth}px`;
+            selectionBox.style.height = `${boxHeight}px`;
+
+
+            // Resize handle
+            const resizeHandle = document.createElement('div');
+            resizeHandle.className = 'resize-handle';
+            selectionBox.appendChild(resizeHandle);
+
+            // Close handle
+            const closeHandle = document.createElement('div');
+            closeHandle.className = 'close-handle';
+            closeHandle.textContent = 'x';
+            closeHandle.title = 'Remove box';
+            selectionBox.appendChild(closeHandle);
+
+            pdfPageContainer.appendChild(selectionBox);
+
+            activeBoxes.set(boxId, { element: selectionBox, fixedWidth: isFixedWidth, pageNum: currentPageNum });
+
+            setupBoxEventListeners(selectionBox, resizeHandle, closeHandle, isFixedWidth);
+            return selectionBox;
+        }
+
+        function clearSelectionBoxes() {
+            activeBoxes.forEach(box => box.element.remove());
+            activeBoxes.clear();
+        }
+
+        function saveBoxesForCurrentPage() {
+            let pageData = allCropData.find(data => data.pageNum === currentPageNum);
+            if (!pageData) {
+                pageData = { pageNum: currentPageNum, cropBoxes: [] };
+                allCropData.push(pageData);
+            } else {
+                pageData.cropBoxes = [];
+            }
+
+            activeBoxes.forEach((box, boxId) => {
+                const rect = box.element.getBoundingClientRect();
+                const containerRect = pdfPageContainer.getBoundingClientRect();
+
+                pageData.cropBoxes.push({
+                    left: `${((rect.left - containerRect.left) / containerRect.width * 100).toFixed(2)}%`,
+                    top: `${((rect.top - containerRect.top) / containerRect.height * 100).toFixed(2)}%`,
+                    width: `${(rect.width / containerRect.width * 100).toFixed(2)}%`,
+                    height: `${(rect.height / containerRect.height * 100).toFixed(2)}%`,
+                    fixedWidth: box.fixedWidth
+                });
+            });
+            console.log(`Saved ${pageData.cropBoxes.length} boxes for page ${currentPageNum}.`);
+        }
+
+        function loadBoxesForCurrentPage() {
+            const pageData = allCropData.find(data => data.pageNum === currentPageNum);
+            if (pageData && pageData.cropBoxes.length > 0) {
+                pageData.cropBoxes.forEach(coords => {
+                    createSelectionBox(coords);
+                });
+                console.log(`Loaded ${pageData.cropBoxes.length} boxes for page ${currentPageNum}.`);
+            }
+        }
+
+        addBoxBtn.addEventListener('click', () => {
+            if (pdfDoc) {
+                createSelectionBox();
+            }
+        });
+
+        // --- Drag & Resize Logic for Individual Boxes ---
+
+        function setupBoxEventListeners(boxElement, resizeHandle, closeHandle, isFixedWidth) {
+            let isDragging = false;
+            let isResizing = false;
+            let initialMouseX, initialMouseY;
+            let initialBoxX, initialBoxY, initialBoxWidth, initialBoxHeight;
+
+            const startInteraction = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+                const rect = boxElement.getBoundingClientRect();
+                initialMouseX = clientX;
+                initialMouseY = clientY;
+                initialBoxX = rect.left;
+                initialBoxY = rect.top;
+                initialBoxWidth = rect.width;
+                initialBoxHeight = rect.height;
+
+                if (e.target === resizeHandle) {
+                    isResizing = true;
+                    boxElement.classList.add('resizing');
+                } else if (e.target === boxElement) {
+                    isDragging = true;
+                    boxElement.style.cursor = 'grabbing';
+                }
+
+                document.addEventListener('mousemove', duringInteraction);
+                document.addEventListener('mouseup', endInteraction);
+                document.addEventListener('touchmove', duringInteraction);
+                document.addEventListener('touchend', endInteraction);
+            };
+
+            const duringInteraction = (e) => {
+                if (!isDragging && !isResizing) return;
+
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+                const dx = clientX - initialMouseX;
+                const dy = clientY - initialMouseY;
+
+                const containerRect = pdfPageContainer.getBoundingClientRect();
+
+                if (isDragging) {
+                    let newX = initialBoxX + dx - containerRect.left;
+                    let newY = initialBoxY + dy - containerRect.top;
+
+                    newX = Math.max(0, Math.min(newX, containerRect.width - boxElement.offsetWidth));
+                    newY = Math.max(0, Math.min(newY, containerRect.height - boxElement.offsetHeight));
+
+                    boxElement.style.left = `${newX}px`;
+                    boxElement.style.top = `${newY}px`;
+
+                } else if (isResizing) {
+                    let newWidth = initialBoxWidth + dx;
+                    let newHeight = initialBoxHeight + dy;
+
+                    if (!isFixedWidth) {
+                        newWidth = Math.max(20, Math.min(newWidth, containerRect.width - boxElement.offsetLeft));
+                        boxElement.style.width = `${newWidth}px`;
+                    } else {
+                        boxElement.style.width = `${initialBoxWidth}px`;
+                    }
+
+                    newHeight = Math.max(20, Math.min(newHeight, containerRect.height - boxElement.offsetTop));
+                    boxElement.style.height = `${newHeight}px`;
+                }
+            };
+
+            const endInteraction = () => {
+                isDragging = false;
+                isResizing = false;
+                boxElement.classList.remove('resizing');
+                boxElement.style.cursor = 'grab';
+                document.removeEventListener('mousemove', duringInteraction);
+                document.removeEventListener('mouseup', endInteraction);
+                document.removeEventListener('touchmove', duringInteraction);
+                document.removeEventListener('touchend', endInteraction);
+            };
+
+            boxElement.addEventListener('mousedown', startInteraction);
+            boxElement.addEventListener('touchstart', startInteraction);
+
+            resizeHandle.addEventListener('mousedown', startInteraction);
+            resizeHandle.addEventListener('touchstart', startInteraction);
+
+            closeHandle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                boxElement.remove();
+                activeBoxes.delete(boxElement.id);
+            });
+        }
+
+        // --- Process & Download Images ---
+
+        processAndDownloadBtn.addEventListener('click', async () => {
+            if (!pdfDoc) {
+                alert('Please load a PDF first.');
+                return;
+            }
+
+            // Save boxes for the current page before processing all
+            saveBoxesForCurrentPage();
+
+            if (allCropData.length === 0 || allCropData.every(data => data.cropBoxes.length === 0)) {
+                alert('No crop boxes defined across any pages.');
+                return;
+            }
+
+            showLoading('Processing images...');
+            const zip = new JSZip();
+            let imageCounter = 0;
+
+            try {
+                for (let i = 0; i < pdfDoc.numPages; i++) {
+                    const pageNum = i + 1;
+                    const pageData = allCropData.find(data => data.pageNum === pageNum);
+
+                    if (pageData && pageData.cropBoxes.length > 0) {
+                        const page = pdfPages[i];
+                        const DOWNLOAD_RENDER_SCALE = 4; // High quality for download
+                        const viewport = page.getViewport({ scale: DOWNLOAD_RENDER_SCALE });
+
+                        const tempCanvas = document.createElement('canvas');
+                        const tempContext = tempCanvas.getContext('2d');
+                        tempCanvas.height = viewport.height;
+                        tempCanvas.width = viewport.width;
+
+                        const renderContext = {
+                            canvasContext: tempContext,
+                            viewport: viewport,
+                        };
+                        await page.render(renderContext).promise;
+
+                        const renderedPdfWidth = tempCanvas.width;
+                        const renderedPdfHeight = tempCanvas.height;
+
+                        const displayCanvasWidth = pdfCanvas.width;
+                        const displayCanvasHeight = pdfCanvas.height;
+
+                        for (const boxCoords of pageData.cropBoxes) {
+                            const displayLeftPx = parseFloat(boxCoords.left) / 100 * displayCanvasWidth;
+                            const displayTopPx = parseFloat(boxCoords.top) / 100 * displayCanvasHeight;
+                            const displayWidthPx = parseFloat(boxCoords.width) / 100 * displayCanvasWidth;
+                            const displayHeightPx = parseFloat(boxCoords.height) / 100 * displayCanvasHeight;
+
+                            const scaleFactorX = renderedPdfWidth / displayCanvasWidth;
+                            const scaleFactorY = renderedPdfHeight / displayCanvasHeight;
+
+                            const finalCropLeft = displayLeftPx * scaleFactorX;
+                            const finalCropTop = displayTopPx * scaleFactorY;
+                            const finalCropWidth = displayWidthPx * scaleFactorX;
+                            const finalCropHeight = displayHeightPx * scaleFactorY;
+
+                            const croppedCanvas = document.createElement('canvas');
+                            const croppedContext = croppedCanvas.getContext('2d');
+                            croppedCanvas.width = finalCropWidth;
+                            croppedCanvas.height = finalCropHeight;
+
+                            croppedContext.drawImage(
+                                tempCanvas,
+                                finalCropLeft, finalCropTop, finalCropWidth, finalCropHeight,
+                                0, 0, finalCropWidth, finalCropHeight
+                            );
+
+                            const imageDataURL = croppedCanvas.toDataURL('image/png');
+                            const base64Data = imageDataURL.split(',')[1];
+                            imageCounter++;
+                            zip.file(`page_${pageNum}_crop_${imageCounter}.png`, base64Data, { base64: true });
+                        }
+                    }
+                }
+
+                if (imageCounter === 0) {
+                    alert('No images were cropped. Please define crop boxes.');
+                    hideLoading();
+                    return;
+                }
+
+                showLoading('Zipping images...');
+                const content = await zip.generateAsync({ type: 'blob' });
+                const zipFileName = `cropped_images_${new Date().toISOString().slice(0,10)}.zip`;
+                downloadLinksDiv.innerHTML = `<button><a id="downloadZipLink" href="#" download="${zipFileName}">Download All ${imageCounter} Images as ZIP</a></button>`;
+                const downloadLinkElement = document.getElementById('downloadZipLink');
+                downloadLinkElement.href = URL.createObjectURL(content);
+
+                hideLoading();
+                alert(`Successfully processed ${imageCounter} images!`);
+
+            } catch (error) {
+                console.error('Error during image processing or zipping:', error);
+                alert('Error processing images. See console for details: ' + error.message);
+                hideLoading();
+            }
+        });
+    </script>
+</body>
+</html>
