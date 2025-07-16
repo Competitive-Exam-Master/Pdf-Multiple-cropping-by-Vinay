@@ -216,6 +216,10 @@
             <button id="prevPage" disabled>Previous</button>
             <span id="pageNumber">Page: - / -</span>
             <button id="nextPage" disabled>Next</button>
+
+            <label for="gotoPageInput" style="margin-left: 20px;">Go to page:</label>
+            <input type="number" id="gotoPageInput" min="1" style="width: 60px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <button id="gotoPageBtn">Go</button>
         </div>
 
         <div class="fixed-width-options">
@@ -263,6 +267,11 @@
         // New UI elements for fixed width
         const fixedWidthCheckbox = document.getElementById('fixedWidthCheckbox');
         const fixedWidthInput = document.getElementById('fixedWidthInput');
+
+        // New UI elements for go to page
+        const gotoPageInput = document.getElementById('gotoPageInput');
+        const gotoPageBtn = document.getElementById('gotoPageBtn');
+
 
         let pdfDoc = null;
         let currentPageNum = 1;
@@ -367,6 +376,8 @@
         function updatePageNavigation() {
             prevPageBtn.disabled = currentPageNum <= 1;
             nextPageBtn.disabled = currentPageNum >= pdfDoc.numPages;
+            gotoPageInput.value = currentPageNum; // Set current page in input
+            gotoPageInput.max = pdfDoc ? pdfDoc.numPages : 1; // Set max attribute
         }
 
         prevPageBtn.addEventListener('click', async () => {
@@ -382,6 +393,27 @@
             if (currentPageNum < pdfDoc.numPages) {
                 saveBoxesForCurrentPage(); // Save current boxes before changing page
                 currentPageNum++;
+                await renderPage(currentPageNum);
+                updatePageNavigation();
+            }
+        });
+
+        // --- Go to Page Logic ---
+        gotoPageBtn.addEventListener('click', async () => {
+            if (!pdfDoc) {
+                alert('Please load a PDF first.');
+                return;
+            }
+            const pageNum = parseInt(gotoPageInput.value);
+            if (isNaN(pageNum) || pageNum < 1 || pageNum > pdfDoc.numPages) {
+                alert(`Please enter a valid page number between 1 and ${pdfDoc.numPages}.`);
+                gotoPageInput.value = currentPageNum; // Reset to current page
+                return;
+            }
+
+            if (pageNum !== currentPageNum) {
+                saveBoxesForCurrentPage(); // Save current boxes before changing page
+                currentPageNum = pageNum;
                 await renderPage(currentPageNum);
                 updatePageNavigation();
             }
